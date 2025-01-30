@@ -5,6 +5,13 @@
         "yield",
         "PathfindAndMoveTo",
         "NeedsRepair",
-        "CanExtractMateria"
+        "CanExtractMateria",
+        "GetSndProperty",
+        "SetSndProperty",
+        "GetInventoryFreeSlotCount",
+        "HasStatus",
+        "IsAddonVisible",
+        "GetCharacterCondition",
+        "NavIsReady"
     ]
 }

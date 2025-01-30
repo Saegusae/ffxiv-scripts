@@ -1,12 +1,15 @@
+-- #region configuration
+
 local config         = {
   general = {
     interval            = 0.125,
     inventory_threshold = 10, -- Minimum space in inventory to keep running main loop (Does not affect subroutines)
-    timeout_threshold   = 30, -- Time in seconds to wait in certain subroutines before trying to exit
+    timeout_threshold   = 10, -- Time in seconds to wait in certain subroutines before trying to exit
   },
   consumables = {
-    food   = false, -- Set to an item to enable use during gathering loop (e.g. "Stuffed Peppers <hq>")
-    potion = false, -- Set to an item to enable use during gathering loop (e.g. "Superior Spiritbond Potion <hq>")
+    food   = false, -- Food item to use during gathering (e.g. "Stuffed Peppers <hq>")
+    potion = false, -- Potion to use during gathering (e.g. "Superior Spiritbond Potion <hq>")
+    manual = false, -- Squadron Manual to use during gathering (eg. "Squadron Spiritbonding Manual")
   },
   subroutines = {
     -- Materia extraction settings
@@ -88,15 +91,19 @@ local exchange_items = {
   { 4, 1, 0, 20 },
 }
 
+-- #endregion
+
 -- Maintenance variables
 local loop_count     = 1
 local terminate      = false
 
 -- Local Function Declarations
-local wait, log, teleport, move, lifestream
+local set_snd_property
+local wait, log, teleport, move, lifestream, use_item, use_food, use_potion
 local subroutine_extract, subroutine_reduce, subroutine_repair, subroutine_trade, subroutine_retainers
 
 --- Runs subroutine checks and handlers
+--- Does not include trade or retainers, as this needs to only handle inventory neutral subroutines
 function RunSubroutines()
   local extract, reduce, repair = table.unpack(config.subroutines)
 
@@ -118,10 +125,13 @@ end
 
 --- Runs one time setup
 function Setup()
+  set_snd_property("UseSNDTargeting", true)
+  set_snd_property("StopMacroIfTargetNotFound", false)
 end
 
 --- The main event loop
 function Loop()
+  local inventory_count = tonumber(GetInventoryFreeSlotCount())
 end
 
 --- Runs one time cleanup
@@ -144,14 +154,63 @@ Cleanup()
 
 --- Extracts materia from equipped items
 subroutine_extract = function()
+  local function extract_materia()
+  end
 end
 
 --- Uses aetherial reduction on eligible items
 subroutine_reduce = function()
+  local function reduce_item()
+  end
 end
 
 --- Repairs gear when durability falls below a certain threshold
 subroutine_repair = function()
+  local function attempt_repair()
+    if config.debug.verbose then
+      log("Attempting to repair gear")
+    end
+
+    while not IsAddonVisible("Repair") do
+      yield("/generalaction repair")
+      wait(5)
+    end
+
+    yield("/callback Repair true 0")
+    wait(1)
+
+    -- Error appears on screen, repair failed
+    -- return early and exit
+    if IsAddonVisible("_TextError") then
+      log("Failed to repair gear")
+      return
+    end
+
+    -- Confirmation window for repair is visible
+    if IsAddonVisible("SelectYesno") then
+      yield("/callback SelectYesno true 0")
+    end
+
+    -- Condition 39 is repairing
+    -- Wait until condition is cleared on character
+    while GetCharacterCondition(39) do
+      wait(10)
+    end
+
+    -- If repair window is still open, close it
+    if IsAddonVisible("Repair") then
+      yield("/callback Repair true -1")
+    end
+
+    if config.debug.verbose then
+      log("Gear repaired successfully")
+    end
+  end
+
+  -- TODO: Implement mounted or gathering checks
+
+  -- Attempt repair
+  attempt_repair()
 end
 
 --- Trades in items for scrips
@@ -166,6 +225,21 @@ end
 
 -- Helper functions
 -- #region helpers
+
+--- Sets SomethingNeedDoing property if unset
+---@param name string @The name of the property to set
+---@param value boolean @The value to set the property to
+set_snd_property = function(name, value)
+  local property = GetSndProperty(name)
+
+  if property ~= value then
+    SetSndProperty(name, tostring(value))
+
+    if config.debug.verbose then
+      log("Set SND Property: " .. name .. " to " .. tostring(value))
+    end
+  end
+end
 
 --- Pauses the script for a set amount of time
 ---@param time integer @The time in seconds to wait
@@ -219,8 +293,92 @@ move = function(x, y, z, fly)
       tostring(nav_ready) .. ", is_casting: " .. tostring(is_casting) .. ", is_loading: " .. tostring(is_loading))
   end
 
+  local function can_fly()
+  end
+
   repeat wait(1) until not is_casting and not is_loading and nav_ready
   PathfindAndMoveTo(x, y, z, fly)
+end
+
+--- Use an item
+--- Does not track if it's actually used or active
+---@param item string @The name of the item to use (e.g. "Stuffed Peppers <hq>")
+use_item = function(item)
+  if config.debug.verbose then
+    log("Using item " .. item)
+  end
+
+  yield("/item " .. item)
+end
+
+--- Similar to `use_item` but includes checks for food items
+---@param item string @The name of the item to use (e.g. "Stuffed Peppers <hq>")
+use_food = function(item)
+  --- Tracks food buff
+  --- @type boolean
+  local status = HasStatus("Well Fed")
+
+  if not status then
+    local start = os.clock()
+
+    -- Initial user settings to restore after checks are complete
+    local initial_settings = {
+      GetSndProperty("UseItemStructsVersion"),
+      GetSndProperty("StopMacroIfItemNotFound"),
+      GetSndProperty("StopMacroIfCantUseItem")
+    }
+
+    -- Set user settings for item use
+    set_snd_property("UseItemStructsVersion", true)
+    set_snd_property("StopMacroIfItemNotFound", false)
+    set_snd_property("StopMacroIfCantUseItem", false)
+
+    repeat
+      use_item(item)
+      wait(1)
+      status = HasStatus("Well Fed")
+    until status or os.clock() - start > config.general.timeout_threshold
+
+    -- Restore user settings after checks are complete
+    set_snd_property("UseItemStructsVersion", initial_settings[1])
+    set_snd_property("StopMacroIfItemNotFound", initial_settings[2])
+    set_snd_property("StopMacroIfCantUseItem", initial_settings[3])
+  end
+end
+
+--- Similar to `use_item` but includes checks for medicine items
+---@param item string @The name of the item to use (e.g. "Superior Spiritbond Potion <hq>")
+use_potion = function(item)
+  --- Tracks pot buff
+  --- @type boolean
+  local status = HasStatus("Medicated")
+
+  if not status then
+    local start = os.clock()
+
+    -- Initial user settings to restore after checks are complete
+    local initial_settings = {
+      GetSndProperty("UseItemStructsVersion"),
+      GetSndProperty("StopMacroIfItemNotFound"),
+      GetSndProperty("StopMacroIfCantUseItem")
+    }
+
+    -- Set user settings for item use
+    set_snd_property("UseItemStructsVersion", true)
+    set_snd_property("StopMacroIfItemNotFound", false)
+    set_snd_property("StopMacroIfCantUseItem", false)
+
+    repeat
+      use_item(item)
+      wait(1)
+      status = HasStatus("Medicated")
+    until status or os.clock() - start > config.general.timeout_threshold
+
+    -- Restore user settings after checks are complete
+    set_snd_property("UseItemStructsVersion", initial_settings[1])
+    set_snd_property("StopMacroIfItemNotFound", initial_settings[2])
+    set_snd_property("StopMacroIfCantUseItem", initial_settings[3])
+  end
 end
 
 -- #endregion
