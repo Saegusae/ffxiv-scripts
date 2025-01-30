@@ -12,6 +12,13 @@
         "HasStatus",
         "IsAddonVisible",
         "GetCharacterCondition",
-        "NavIsReady"
+        "NavIsReady",
+        "QueryMeshPointOnFloorX",
+        "QueryMeshPointOnFloorY",
+        "QueryMeshPointOnFloorZ",
+        "GetPlayerRawXPos",
+        "GetPlayerRawYPos",
+        "GetPlayerRawZPos",
+        "PathIsRunning"
     ]
 }

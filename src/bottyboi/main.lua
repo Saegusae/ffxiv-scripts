@@ -99,7 +99,7 @@ local terminate      = false
 
 -- Local Function Declarations
 local set_snd_property
-local wait, log, teleport, move, lifestream, use_item, use_food, use_potion
+local wait, log, teleport, move, dismount, lifestream, use_item, use_food, use_potion
 local subroutine_extract, subroutine_reduce, subroutine_repair, subroutine_trade, subroutine_retainers
 
 --- Runs subroutine checks and handlers
@@ -298,6 +298,85 @@ move = function(x, y, z, fly)
 
   repeat wait(1) until not is_casting and not is_loading and nav_ready
   PathfindAndMoveTo(x, y, z, fly)
+end
+
+dismount = function()
+  local condition_flying = 77
+  local condition_mounted = 4
+
+  --- Moves the player to ground and dismounts
+  --- Waits if on ground or is able to dismount, retries on fails
+  --- TODO: Implement unstuck mechanism
+  local function move_to_ground()
+    local random_seed = 0
+    ::retry::
+
+    local ground_x, ground_y, ground_z
+    local i = 0
+
+    while not ground_x or not ground_y or not ground_z do
+      local x = GetPlayerRawXPos()
+      local y = GetPlayerRawYPos()
+      local z = GetPlayerRawZPos()
+
+      ground_x = QueryMeshPointOnFloorX(
+        x + math.random(0, random_seed), y + math.random(0, random_seed), z + math.random(0, random_seed), false, i
+      )
+
+      ground_y = QueryMeshPointOnFloorY(
+        x + math.random(0, random_seed), y + math.random(0, random_seed), z + math.random(0, random_seed), false, i
+      )
+
+      ground_z = QueryMeshPointOnFloorZ(
+        x + math.random(0, random_seed), y + math.random(0, random_seed), z + math.random(0, random_seed), false, i
+      )
+
+      i = i + 1
+    end
+
+    local start_time = os.clock()
+    repeat
+      if os.clock() - start_time > config.general.timeout_threshold then
+        if config.debug.verbose then
+          log("Failed to move to ground retrying...")
+        end
+
+        random_seed = random_seed + 1
+        goto retry
+      end
+
+      wait(1)
+    until not PathIsRunning()
+
+    yield('/gaction "Mount Roulette"')
+
+    start_time = os.clock()
+    repeat
+      if os.clock() - start_time > config.general.timeout_threshold then
+        if config.debug.verbose then
+          log("Failed to dismount retrying...")
+        end
+
+        random_seed = random_seed + 1
+        goto retry
+      end
+
+      wait(1)
+    until not GetCharacterCondition(condition_mounted)
+
+    -- TODO: Write an unstuck mechanism here that takes retries into account
+    -- ex. Teleport to an aetheryte after x failures
+  end
+
+  if GetCharacterCondition(condition_flying) then move_to_ground() end
+
+  if GetCharacterCondition(condition_mounted) then
+    yield('/gaction "Mount Roulette"')
+
+    repeat
+      wait(1)
+    until not GetCharacterCondition(condition_mounted)
+  end
 end
 
 --- Use an item
